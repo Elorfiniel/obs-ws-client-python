@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "obs-ws-client"
+version = "0.1.0"
+description = "A websocket client for OBS Studio in Python."
+authors = ["Elorfiniel <markgenthusiastic@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "obswsc" }]
+
+
+[tool.poetry.dependencies]
+python = "^3.9"
+websockets = "^14.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,13 @@
+# ignore python cache
+__pycache__
+
+# ignore package build files
+*.egg-info
+
+# ignore temporary scripts and backup files
+*tmp*.py
+*temp*.py
+*.tmp
+*.temp
+*.bck
+*.backup
