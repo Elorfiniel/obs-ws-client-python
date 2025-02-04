@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import typing
+import uuid
 import websockets
 
 
@@ -18,6 +19,13 @@ class EventRegistryHash(RegistryHash):
 
   def hash(self, query: object) -> str:
     return query['eventType']
+
+
+class RequestRegistryHash(RegistryHash):
+  '''A hash strategy for request objects.'''
+
+  def hash(self, query: object) -> str:
+    return query['requestType']
 
 
 async def obs_ws_recv(ws: websockets.ClientConnection):
@@ -58,7 +66,7 @@ async def obs_ws_auth(ws: websockets.ClientConnection,
     `password`: the password of the OBS WebSocket server (optional).
   '''
 
-  identify_data = {
+  identify_d = {
     'rpcVersion': RPC_VERSION,
     'eventSubscriptions': EventSubscription.All.value
   }
@@ -74,9 +82,9 @@ async def obs_ws_auth(ws: websockets.ClientConnection,
     auth_str = base64.b64encode(hashlib.sha256(auth_str).digest())
     auth_str = auth_str.decode('utf-8')
 
-    identify_data['authentication'] = auth_str
+    identify_d['authentication'] = auth_str
 
-  await obs_ws_send(ws, WebSocketOpCode.Identify.value, identify_data)
+  await obs_ws_send(ws, WebSocketOpCode.Identify.value, identify_d)
 
 
 async def obs_ws_subs(ws: websockets.ClientConnection,
@@ -88,11 +96,36 @@ async def obs_ws_subs(ws: websockets.ClientConnection,
     `events`: the events to subscribe to (int).
   '''
 
-  reidentify_data = {
+  reidentify_d = {
     'eventSubscriptions': events
   }
 
-  await obs_ws_send(ws, WebSocketOpCode.Reidentify.value, reidentify_data)
+  await obs_ws_send(ws, WebSocketOpCode.Reidentify.value, reidentify_d)
+
+
+async def obs_ws_request(ws: websockets.ClientConnection,
+                         request_type: str,
+                         request_data: dict = None):
+  '''Make a request to the OBS WebSocket server. Returns a unique ID
+  for the request, so that the response can be matched to the request.
+
+  Args:
+    `ws`: the established websocket connection.
+    `request_type`: the type of the request (str).
+    `request_data`: the data of the request (dict, optional).
+  '''
+
+  request_id = str(uuid.uuid4())
+  request_d = {
+    'requestType': request_type,
+    'requestId': request_id,
+  }
+  if request_data is not None:
+    request_d['requestData'] = request_data
+
+  await obs_ws_send(ws, WebSocketOpCode.Request.value, request_d)
+
+  return request_id
 
 
 async def ws_recv_loop(ws: websockets.ClientConnection,
@@ -120,8 +153,8 @@ async def ws_recv_loop(ws: websockets.ClientConnection,
       continue
 
 
-async def ws_until_auth(event: asyncio.Event):
-  '''Wait until the client is authenticated.
+async def until_event(event: asyncio.Event):
+  '''Wait until the event is set.
 
   Args:
     `event`: the event to wait for.
@@ -130,8 +163,8 @@ async def ws_until_auth(event: asyncio.Event):
   await event.wait()
 
 
-async def ws_set_auth(event: asyncio.Event):
-  '''Set the authentication event.
+async def set_event(event: asyncio.Event):
+  '''Set the event.
 
   Args:
     `event`: the event to set.
@@ -140,14 +173,34 @@ async def ws_set_auth(event: asyncio.Event):
   event.set()
 
 
-async def ws_reset_auth(event: asyncio.Event):
-  '''Reset the authentication event.
+async def reset_event(event: asyncio.Event):
+  '''Reset the event.
 
   Args:
     `event`: the event to reset.
   '''
 
   event.clear()
+
+
+class RequestRecord:
+  '''Record for a request made to the OBS WebSocket server.'''
+
+  def __init__(self):
+    self.event = asyncio.Event()
+    self.response_data = None
+
+  async def wait(self):
+    await until_event(self.event)
+
+  async def done(self):
+    await set_event(self.event)
+
+  def set_data(self, data: dict):
+    self.response_data = data
+
+  def get_data(self):
+    return self.response_data
 
 
 class ObsWsClient:
@@ -167,7 +220,10 @@ class ObsWsClient:
 
     self.identified = asyncio.Event()
 
-    self.events = Registry(EventRegistryHash())
+    self.e_cbs = Registry(EventRegistryHash())
+    self.r_cbs = Registry(RequestRegistryHash())
+
+    self.requests: typing.Dict[str, RequestRecord] = dict()
 
   def reg_event_cb(self, callback: typing.Awaitable, event_type: str = None):
     '''Register a callback for a specific event type. If not specified, the callback
@@ -179,7 +235,7 @@ class ObsWsClient:
     '''
 
     query = {'eventType': event_type} if event_type is not None else None
-    self.events.reg(callback, query)
+    self.e_cbs.reg(callback, query)
 
   def unreg_event_cb(self, callback: typing.Awaitable, event_type: str = None):
     '''Unregister a callback for a specific event type. If not specified, the callback
@@ -191,7 +247,31 @@ class ObsWsClient:
     '''
 
     query = {'eventType': event_type} if event_type is not None else None
-    self.events.unreg(callback, query)
+    self.e_cbs.unreg(callback, query)
+
+  def reg_request_cb(self, callback: typing.Awaitable, request_type: str = None):
+    '''Register a callback for a specific request type. If not specified, the callback
+    will be registered as a global callback.
+
+    Args:
+      `callback`: the callback function to register.
+      `request_type`: the request type to register the callback for (optional).
+    '''
+
+    query = {'requestType': request_type} if request_type is not None else None
+    self.r_cbs.reg(callback, query)
+
+  def unreg_request_cb(self, callback: typing.Awaitable, request_type: str = None):
+    '''Unregister a callback for a specific request type. If not specified, the callback
+    will be unregistered as a global callback.
+
+    Args:
+      `callback`: the callback function to unregister.
+      `request_type`: the request type to unregister the callback for (optional).
+    '''
+
+    query = {'requestType': request_type} if request_type is not None else None
+    self.r_cbs.unreg(callback, query)
 
   async def connect(self, timeout: int = 30, max_size: int = 4*1024*1024):
     '''Connect to the OBS WebSocket server, waiting for the connection to be established
@@ -226,12 +306,13 @@ class ObsWsClient:
     if self.ws is not None:
       if self.task is not None:
         self.task.cancel()
+        self.task = None
+
       await self.ws.close()
-
       self.ws = None
-      self.task = None
 
-      await ws_reset_auth(self.identified)
+      await reset_event(self.identified)
+      self.requests.clear()
 
   async def subscribe(self, events: int = EventSubscription.All.value):
     '''Subscribe to the given events.
@@ -240,8 +321,26 @@ class ObsWsClient:
       `events`: the events to subscribe to (int).
     '''
 
-    await ws_until_auth(self.identified)
+    await until_event(self.identified)
     await obs_ws_subs(self.ws, events)
+
+  async def request(self, request_type: str, request_data: dict = None):
+    '''Make a request to the OBS WebSocket server, wait until the response is received.
+
+    Args:
+      `request_type`: the type of the request (str).
+      `request_data`: the data of the request (dict, optional).
+    '''
+
+    await until_event(self.identified)
+
+    request_id = await obs_ws_request(self.ws, request_type, request_data)
+
+    self.requests[request_id] = RequestRecord()
+    await self.requests[request_id].wait()
+
+    request_record = self.requests.pop(request_id)
+    return request_record.get_data()
 
   async def on_message(self, opcode: int, data: dict):
     '''Handle incoming messages from the OBS WebSocket server.
@@ -259,12 +358,31 @@ class ObsWsClient:
     elif opcode == WebSocketOpCode.Identified.value:
       if 'negotiatedRpcVersion' in data:
         assert data['negotiatedRpcVersion'] == RPC_VERSION
-      await ws_set_auth(self.identified)
+      await set_event(self.identified)
 
     elif opcode == WebSocketOpCode.Event.value:
-      callbacks = self.events.query(data)
+      callbacks = self.e_cbs.query(data)
       for callback in callbacks:
         asyncio.create_task(callback(
           event_type=data['eventType'],
+          event_intent=data['eventIntent'],
           event_data=data.get('eventData', None),
         ))
+
+    elif opcode == WebSocketOpCode.RequestResponse.value:
+      callbacks = self.r_cbs.query(data)
+      for callback in callbacks:
+        asyncio.create_task(callback(
+          request_type=data['requestType'],
+          request_id=data['requestId'],
+          request_status=data['requestStatus'],
+          response_data=data.get('responseData', None),
+        ))
+
+      if data['requestId'] in self.requests:
+        request_record = self.requests[data['requestId']]
+        request_record.set_data(dict(
+          request_status=data['requestStatus'],
+          response_data=data.get('responseData', None),
+        ))
+        await request_record.done()
