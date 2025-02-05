@@ -2,7 +2,7 @@
 __pycache__
 
 # ignore package build files
-*.egg-info
+dist/**
 
 # ignore temporary scripts and backup files
 *tmp*.py

@@ -5,7 +5,17 @@ description = "A websocket client for OBS Studio in Python."
 authors = ["Elorfiniel <markgenthusiastic@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+keywords = ["obs", "obs-studio", "websocket", "asyncio", "client"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+]
 packages = [{ include = "obswsc" }]
+
+
+[tool.poetry.urls]
+gitee = "https://gitee.com/elorfiniel/obs-ws-client-python"
+github = "https://github.com/Elorfiniel/obs-ws-client-python"
 
 
 [tool.poetry.dependencies]

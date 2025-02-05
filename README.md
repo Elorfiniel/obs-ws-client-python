@@ -14,7 +14,7 @@ A Python library for interacting with OBS Studio through its WebSocket protocol 
 
 ## Installation
 
-This package uses [Poetry](https://python-poetry.org/) for dependency management. Make sure you have installed Poetry. Then simply run:
+This package uses [Poetry](https://python-poetry.org/) for dependency management. Make sure you have installed Poetry (v1.8.3). Then simply run:
 
 ```bash
 poetry install
