@@ -28,10 +28,32 @@ poetry install
 4. Set the Server Port (default is 4455)
 5. Optionally set the password for authentication
 
+## Quickstart
+
+Below is a simple code snippet that demonstrates the usage of ObsWsClient to start and stop recording in OBS Studio. For more examples, checkout the `example` folder.
+
+```python
+from obswsc.client import ObsWsClient
+from obswsc.data import Request
+
+import asyncio
+
+async def main():
+  client = ObsWsClient(url='ws://localhost:4455')
+
+  async with client:
+    await client.request(Request('StartRecord'))
+    await asyncio.sleep(10.0)
+    res = await client.request(Request('StopRecord'))
+    print(f'recorded video: {res.res_data["outputPath"]}')
+
+asyncio.run(main())
+```
+
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under [the MIT License](LICENSE).
 
 ## Acknowledgments
 
-- Thanks to the OBS Studio team for creating the WebSocket protocol
+- Thanks to the OBS Studio team for creating the WebSocket protocol.
