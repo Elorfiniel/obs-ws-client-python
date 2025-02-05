@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import logging
+import traceback
 import uuid
 import websockets
 
@@ -240,16 +241,20 @@ class RequestRecord:
 
 
 class ObsWsClient:
-  def __init__(self, url: str = 'ws://localhost:4455', password: str = ''):
+  def __init__(self, url: str = 'ws://localhost:4455',
+               password: str = '',
+               mute_exc: bool = True):
     '''Initialize the ObsWsClient with the given URL and password.
 
     Args:
       `url`: the URL of the OBS WebSocket server.
       `password`: the password of the OBS WebSocket server (optional).
+      `mute_exc`: whether to mute exceptions in async context manager (optional).
     '''
 
     self.url = url
     self.password = password
+    self.mute_exc = mute_exc
 
     self.ws = None
     self.task = None
@@ -260,6 +265,19 @@ class ObsWsClient:
     self.r_cbs = Registry(RequestRegistryHash())
 
     self.requests: Dict[str, RequestRecord] = dict()
+
+  async def __aenter__(self):
+    is_connected = await self.connect(timeout=60)
+    if not is_connected:
+      raise ConnectionError(f'cannot connect to OBS WebSocket server: {self.url}')
+    return self
+
+  async def __aexit__(self, exc_type, exc_value, exc_tb):
+    if exc_type is not None:
+      traceback.print_exception(exc_type, exc_value, exc_tb)
+
+    await self.disconnect()
+    return self.mute_exc
 
   def reg_event_cb(self, callback: Awaitable, event_type: str = None):
     '''Register a callback for a specific event type. If not specified, the callback
